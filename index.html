@@ -267,7 +267,10 @@ dialog::backdrop { background: rgba(0,0,0,.55); }
 
   /* ---------- 描画 ---------- */
   document.querySelectorAll('[data-brand]').forEach(n => n.textContent = CONFIG.BRAND);
-  if (!CONFIG.GAS_URL) $('#demoNote').hidden = false;
+  // Apps Script の中で表示されているときは、そのスクリプトに直接送る（URL 設定不要）
+  const IN_GAS = typeof google !== 'undefined' && google.script && google.script.run;
+  const LIVE = IN_GAS || !!CONFIG.GAS_URL;
+  if (!LIVE) $('#demoNote').hidden = false;
 
   const qs = CONFIG.questions;
   $('#questions').innerHTML = qs.map((q, i) => {
@@ -414,7 +417,10 @@ dialog::backdrop { background: rgba(0,0,0,.55); }
     btn.textContent = '送信中…';
     $('#sendErr').textContent = '';
     try {
-      if (CONFIG.GAS_URL) {
+      if (IN_GAS) {
+        const json = await new Promise((ok, ng) => google.script.run.withSuccessHandler(ok).withFailureHandler(ng).submit(payload));
+        if (!json.ok) throw new Error(json.error || 'failed');
+      } else if (CONFIG.GAS_URL) {
         // text/plain で送ると CORS のプリフライトが発生せず GAS に届く
         const res = await fetch(CONFIG.GAS_URL, { method: 'POST', body: JSON.stringify(payload) });
         const json = await res.json();
@@ -429,7 +435,7 @@ dialog::backdrop { background: rgba(0,0,0,.55); }
         <div class="mark"><svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L20 7"/></svg></div>
         <h1>受け取りました</h1>
         <p>貴重な声をありがとうございました。<br>いただいた想いは、運営で大切に読ませていただきます。<br>またどこかで会えたらうれしいです。</p>
-        ${CONFIG.GAS_URL ? '' : '<p class="demo" style="margin-top:20px">（デモモードのため実際には投稿されていません）</p>'}
+        ${LIVE ? '' : '<p class="demo" style="margin-top:20px">（デモモードのため実際には投稿されていません）</p>'}
       </div>`;
       window.scrollTo(0, 0);
     } catch (err) {

@@ -32,17 +32,35 @@ const BASE_HEADERS = ['受付日', '匿名ID', '状態', '想い'];
 
 /* ---------------- 受付 ---------------- */
 
+/** ウェブアプリの URL を開くとアンケート画面（Form.html）を表示する */
 function doGet() {
-  return out({ ok: true, message: '退会アンケート受付中' });
+  return HtmlService.createHtmlOutputFromFile('Form')
+    .setTitle('退会アンケート')
+    .addMetaTag('viewport', 'width=device-width, initial-scale=1')
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
 
+/** アンケート画面（Form.html）から google.script.run で呼ばれる */
+function submit(body) {
+  return handleSubmission(body || {});
+}
+
+/** 外部ページから POST された場合（旧方式・互換用） */
 function doPost(e) {
   try {
-    const body = JSON.parse((e && e.postData && e.postData.contents) || '{}');
+    return out(handleSubmission(JSON.parse((e && e.postData && e.postData.contents) || '{}')));
+  } catch (err) {
+    console.error(err);
+    return out({ ok: false, error: 'server' });
+  }
+}
+
+function handleSubmission(body) {
+  try {
 
     // ボット対策：見えない入力欄に何か入っている／速すぎる送信は成功扱いで捨てる
-    if (body.hp) return out({ ok: true });
-    if (typeof body.elapsedMs === 'number' && body.elapsedMs < CONFIG.MIN_ELAPSED_MS) return out({ ok: true });
+    if (body.hp) return { ok: true };
+    if (typeof body.elapsedMs === 'number' && body.elapsedMs < CONFIG.MIN_ELAPSED_MS) return { ok: true };
 
     const answers = (Array.isArray(body.answers) ? body.answers : [])
       .slice(0, CONFIG.MAX_ANSWERS)
@@ -53,7 +71,7 @@ function doPost(e) {
       .filter(a => a.title);
     const message = clip(anonymizeText(body.message), CONFIG.MAX_MESSAGE);
 
-    if (!answers.some(a => a.value) && !message) return out({ ok: false, error: 'empty' });
+    if (!answers.some(a => a.value) && !message) return { ok: false, error: 'empty' };
 
     const rec = { anonId: makeAnonId(), answers, message };
     const row = appendRecord(rec);
@@ -66,10 +84,10 @@ function doPost(e) {
         console.error(err); // 未投稿のまま残るので flushQueue で再送できる
       }
     }
-    return out({ ok: true });
+    return { ok: true };
   } catch (err) {
     console.error(err);
-    return out({ ok: false, error: 'server' });
+    return { ok: false, error: 'server' };
   }
 }
 
