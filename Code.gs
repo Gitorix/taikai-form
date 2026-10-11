@@ -23,6 +23,10 @@ const CONFIG = {
   MIN_ELAPSED_MS: 3000,    // これより速い送信はボットとみなして捨てる
 };
 
+// 集計シートでグラフにしない列（自由記述）
+const DASH_SKIP = ['差し支えなければ、他に参加されているコミュニティーを教えて頂けないでしょうか？'];
+const DASH_SHEET = '集計';
+
 const COL = { DATE: 1, ANON: 2, STATUS: 3, MESSAGE: 4, FIRST_Q: 5 };
 const BASE_HEADERS = ['受付日', '匿名ID', '状態', '想い'];
 
@@ -134,6 +138,11 @@ function appendRecord(rec) {
 }
 
 /** まとめ投稿：未投稿の回答をシャッフルして Discord へ（時間トリガーから呼ばれる） */
+function dailyJob() {
+  if (CONFIG.MODE === 'batch') flushQueue();
+  buildDashboard();
+}
+
 function flushQueue() {
   const lock = LockService.getScriptLock();
   lock.waitLock(30000);
@@ -230,6 +239,97 @@ function send(url, payload, retried) {
   if (code >= 300) throw new Error('Discord ' + code + ': ' + res.getContentText());
 }
 
+/* ---------------- 管理メニュー・集計 ---------------- */
+
+/** スプレッドシートを開くと上部に「退会アンケート」メニューが出る */
+function onOpen() {
+  SpreadsheetApp.getUi().createMenu('退会アンケート')
+    .addItem('📊 集計グラフを更新', 'buildDashboard')
+    .addSeparator()
+    .addItem('Discord にテスト投稿', 'testDiscord')
+    .addItem('溜まっている回答を今すぐ投稿', 'flushQueue')
+    .addItem('毎日の自動処理を設定（最初に1回）', 'setupBatchTrigger')
+    .addToUi();
+}
+
+/** 「回答」シートを数えて「集計」シートに表とグラフを作り直す */
+function buildDashboard() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const src = getSheet();
+  const last = src.getLastRow();
+  const values = last >= 2 ? src.getRange(1, 1, last, src.getLastColumn()).getValues() : [src.getRange(1, 1, 1, src.getLastColumn()).getValues()[0]];
+  const headers = values[0].map(String);
+  const rows = values.slice(1);
+
+  let sh = ss.getSheetByName(DASH_SHEET);
+  if (!sh) sh = ss.insertSheet(DASH_SHEET, 0);
+  sh.getCharts().forEach(c => sh.removeChart(c));
+  sh.clear();
+  sh.setColumnWidth(1, 260);
+  sh.setColumnWidth(2, 70);
+
+  sh.getRange(1, 1, 1, 2).setValues([['退会アンケート 集計', '']]).setFontWeight('bold').setFontSize(14);
+  sh.getRange(2, 1, 1, 2).setValues([['回答数（合計）', rows.length]]);
+  sh.getRange(3, 1).setValue('更新：' + Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy/MM/dd HH:mm') + '（メニュー「退会アンケート → 集計グラフを更新」で最新に）').setFontColor('#888888');
+
+  let r = 5;
+  const addBlock = (title, pairs, type) => {
+    if (!pairs.length) return;
+    sh.getRange(r, 1, 1, 2).setValues([[title, '件数']]).setFontWeight('bold').setBackground('#FCF3DE');
+    sh.getRange(r + 1, 1, pairs.length, 2).setValues(pairs);
+    const chart = sh.newChart()
+      .setChartType(type)
+      .addRange(sh.getRange(r, 1, pairs.length + 1, 2))
+      .setNumHeaders(1)
+      .setPosition(r, 4, 0, 0)
+      .setOption('title', title)
+      .setOption('legend', { position: type === Charts.ChartType.PIE ? 'right' : 'none' })
+      .setOption('colors', ['#E2A52B'])
+      .setOption('width', 620)
+      .setOption('height', Math.max(240, pairs.length * 34 + 80))
+      .build();
+    sh.insertChart(chart);
+    r += Math.max(pairs.length + 3, Math.ceil(Math.max(240, pairs.length * 34 + 80) / 21) + 2);
+  };
+
+  // 月ごとの回答数
+  const months = {};
+  rows.forEach(v => {
+    const d = v[COL.DATE - 1];
+    const m = d instanceof Date ? Utilities.formatDate(d, 'Asia/Tokyo', 'yyyy/MM') : String(d).slice(0, 7);
+    if (m) months[m] = (months[m] || 0) + 1;
+  });
+  addBlock('月ごとの回答数', Object.keys(months).sort().map(k => [k, months[k]]), Charts.ChartType.COLUMN);
+
+  // 選択式の質問ごと
+  headers.slice(COL.FIRST_Q - 1).forEach((h, j) => {
+    if (!h || DASH_SKIP.indexOf(h) !== -1) return;
+    const counts = {};
+    rows.forEach(v => {
+      String(v[COL.FIRST_Q - 1 + j] || '').split(' / ').map(x => x.trim()).filter(Boolean).forEach(x => {
+        const key = x.indexOf('その他：') === 0 ? 'その他' : x;
+        counts[key] = (counts[key] || 0) + 1;
+      });
+    });
+    let pairs = Object.keys(counts).map(k => [k, counts[k]]);
+    if (/満足度/.test(h)) pairs.sort((a, b) => String(b[0]).localeCompare(String(a[0])));
+    else pairs.sort((a, b) => b[1] - a[1]);
+    // 1 件ずつしかない自由記述っぽい列は表だけ（グラフにしない）
+    if (pairs.length > 15) return;
+    addBlock(h, pairs, pairs.length <= 5 ? Charts.ChartType.PIE : Charts.ChartType.BAR);
+  });
+
+  // 他に参加しているコミュニティー（自由記述）は一覧で
+  DASH_SKIP.forEach(h => {
+    const j = headers.indexOf(h);
+    if (j === -1) return;
+    const list = rows.map(v => String(v[j] || '').trim()).filter(Boolean);
+    sh.getRange(r, 1).setValue('他に参加しているコミュニティー（自由記述）').setFontWeight('bold').setBackground('#FCF3DE');
+    if (list.length) sh.getRange(r + 1, 1, list.length, 1).setValues(list.map(x => [x]));
+    r += list.length + 3;
+  });
+}
+
 /* ---------------- 初期設定用（エディタから手動で実行） ---------------- */
 
 /** Discord にテスト投稿する（最初の権限承認もこれで行う） */
@@ -245,12 +345,12 @@ function testDiscord() {
   });
 }
 
-/** まとめ投稿の時間トリガーを作る（MODE が 'batch' のとき 1 回だけ実行） */
+/** 毎日の自動処理（まとめ投稿＋集計グラフ更新）のトリガーを作る。最初に 1 回だけ実行 */
 function setupBatchTrigger() {
   ScriptApp.getProjectTriggers()
-    .filter(t => t.getHandlerFunction() === 'flushQueue')
+    .filter(t => ['flushQueue', 'dailyJob'].indexOf(t.getHandlerFunction()) !== -1)
     .forEach(t => ScriptApp.deleteTrigger(t));
-  ScriptApp.newTrigger('flushQueue').timeBased().everyDays(1).atHour(CONFIG.BATCH_HOUR).inTimezone('Asia/Tokyo').create();
+  ScriptApp.newTrigger('dailyJob').timeBased().everyDays(1).atHour(CONFIG.BATCH_HOUR).inTimezone('Asia/Tokyo').create();
 }
 
 /* ---------------- 小物 ---------------- */
