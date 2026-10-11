@@ -2,6 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="utf-8">
+<meta name="color-scheme" content="light">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex">
 <title>退会アンケート</title>
@@ -45,18 +46,8 @@ const CONFIG = {
   --gold: #E2A52B; --gold-ink: #8A5E07; --gold-soft: #FCF3DE; --danger: #C2410C;
   --dc-bg: #313338; --dc-embed: #2B2D31; --dc-text: #DBDEE1; --dc-sub: #B5BAC1;
 }
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --bg: #131312; --card: #1C1C1B; --ink: #EDEBE6; --sub: #A29F98; --line: #34322E;
-    --gold: #F0B740; --gold-ink: #F5C969; --gold-soft: #2A2416; --danger: #FB923C;
-  }
-}
-:root[data-theme="dark"] {
-  --bg: #131312; --card: #1C1C1B; --ink: #EDEBE6; --sub: #A29F98; --line: #34322E;
-  --gold: #F0B740; --gold-ink: #F5C969; --gold-soft: #2A2416; --danger: #FB923C;
-}
 * { box-sizing: border-box; }
-html { -webkit-text-size-adjust: 100%; }
+html { -webkit-text-size-adjust: 100%; color-scheme: light; }
 body {
   margin: 0; background: var(--bg); color: var(--ink);
   font-family: "Noto Sans JP", system-ui, -apple-system, sans-serif;
