@@ -29,6 +29,8 @@ const CONFIG = {
     { id: 'satisfaction', type: 'scale', title: '全体の満足度', low: '不満', high: '満足' },
     { id: 'comeback', type: 'radio', title: 'また戻ってくる可能性は？',
       options: ['条件が合えば戻りたい', 'わからない', 'たぶん戻らない'] },
+    { id: 'communities', type: 'text', title: '差し支えなければ、他に参加されているコミュニティーを教えて頂けないでしょうか？',
+      note: '任意です', placeholder: '例）〇〇サロン、△△DAO など' },
   ],
   message: {
     title: '運営・メンバーへの想い',
@@ -271,7 +273,9 @@ dialog::backdrop { background: rgba(0,0,0,.55); }
   $('#questions').innerHTML = qs.map((q, i) => {
     const note = q.noteFrom ? `現在の料金：${CONFIG[q.noteFrom]}` : q.note;
     let body;
-    if (q.type === 'scale') {
+    if (q.type === 'text') {
+      body = `<input type="text" class="other-input show" id="${q.id}-text" maxlength="300" placeholder="${esc(q.placeholder || '')}">`;
+    } else if (q.type === 'scale') {
       body = `<div class="chips scale">${[1, 2, 3, 4, 5].map(n =>
         `<label class="chip"><input type="radio" name="${q.id}" value="${n}"><span>${n}</span></label>`).join('')}</div>
         <div class="scale-labels"><span>${esc(q.low)}</span><span>${esc(q.high)}</span></div>`;
@@ -300,6 +304,7 @@ dialog::backdrop { background: rgba(0,0,0,.55); }
   const getRaw = () => {
     const raw = { message: ta.value, other: {} };
     qs.forEach(q => {
+      if (q.type === 'text') { raw[q.id] = document.getElementById(`${q.id}-text`).value; return; }
       const checked = [...document.querySelectorAll(`input[name="${q.id}"]:checked`)].map(n => n.value);
       raw[q.id] = q.type === 'checkbox' ? checked : (checked[0] || '');
       const other = document.getElementById(`${q.id}-other`);
@@ -310,6 +315,7 @@ dialog::backdrop { background: rgba(0,0,0,.55); }
   const setRaw = raw => {
     if (!raw) return;
     qs.forEach(q => {
+      if (q.type === 'text') { document.getElementById(`${q.id}-text`).value = raw[q.id] || ''; return; }
       const vals = [].concat(raw[q.id] || []);
       document.querySelectorAll(`input[name="${q.id}"]`).forEach(n => { n.checked = vals.includes(n.value); });
       const other = document.getElementById(`${q.id}-other`);
@@ -350,7 +356,9 @@ dialog::backdrop { background: rgba(0,0,0,.55); }
     const raw = getRaw();
     const answers = qs.map(q => {
       let value = raw[q.id];
-      if (q.type === 'scale') {
+      if (q.type === 'text') {
+        value = value.trim();
+      } else if (q.type === 'scale') {
         const n = Number(value);
         value = n ? `${'★'.repeat(n)}${'☆'.repeat(5 - n)}（${n}/5）` : '';
       } else if (q.type === 'checkbox') {
