@@ -155,8 +155,9 @@ dialog::backdrop { background: rgba(0,0,0,.55); }
 .dc-author { font-size: 13px; font-weight: 700; color: #fff; }
 .dc-title { font-weight: 700; color: #fff; margin: 4px 0 6px; }
 .dc-desc { white-space: pre-wrap; word-break: break-word; max-height: 260px; overflow: auto; }
-.dc-fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 8px 14px; margin-top: 10px; }
-.dc-field b { display: block; font-size: 13px; color: #fff; }
+.dc-fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(170px, 100%), 1fr)); gap: 8px 14px; margin-top: 10px; }
+.dc-field { min-width: 0; }
+.dc-field b { display: block; word-break: break-word; font-size: 13px; color: #fff; }
 .dc-field div { font-size: 13px; color: var(--dc-sub); white-space: pre-wrap; word-break: break-word; }
 .dc-foot { font-size: 11px; color: var(--dc-sub); margin-top: 10px; }
 .mask { background: rgba(226,165,43,.22); color: #F5C969; border-radius: 3px; padding: 0 2px; }
@@ -174,6 +175,13 @@ dialog::backdrop { background: rgba(0,0,0,.55); }
   .chip span { font-size: 14px; padding: 8px 12px; }
   .bar .hint { display: none; }
   .bar .btn { width: 100%; }
+}
+@media (max-width: 480px) {
+  .m-head, .m-body { padding-left: 14px; padding-right: 14px; }
+  .dc { padding: 10px; }
+  .dc-embed { padding: 10px; }
+  .m-actions { flex-direction: column-reverse; align-items: stretch; }
+  .m-actions .btn { width: 100%; margin: 0; }
 }
 </style>
 </head>
