@@ -1,0 +1,436 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex">
+<title>退会アンケート</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&display=swap" rel="stylesheet">
+<script>
+/* ===================== 設定（ここだけ編集すればOK） ===================== */
+const CONFIG = {
+  // Google Apps Script のウェブアプリURL。空のままだとデモモード（送信されない）
+  GAS_URL: '',
+  BRAND: 'SEVEN DAO',
+  CURRENT_PRICE: '月額 5,000円',
+  MESSAGE_MAX: 5000,
+  questions: [
+    { id: 'tenure', type: 'radio', title: '在籍期間',
+      options: ['1ヶ月未満', '1〜3ヶ月', '3〜6ヶ月', '6ヶ月〜1年', '1年以上'] },
+    { id: 'reasons', type: 'checkbox', title: '退会の理由', note: '当てはまるものをすべて選んでください', required: true, other: true,
+      options: ['料金が高い', '内容が期待と違った', '情報量が多くて追いきれない', '時間がとれない', '成果が出なかった',
+                'コミュニティの雰囲気が合わない', '運営の対応に不満', '他のサービスに移る', '目的を達成した', '一時的な休止'] },
+    { id: 'price', type: 'radio', title: 'いくらなら続けていましたか？', noteFrom: 'CURRENT_PRICE',
+      options: ['料金に関して意見なし', '〜1,000円', '1,000〜1,999円', '2,000〜2,999円', '3,000〜3,999円', '4,000〜4,999円', '料金は理由ではない（現状のままでOK）'] },
+    { id: 'liked', type: 'checkbox', title: '良かったところ', note: 'あれば選んでください', other: true,
+      options: ['情報発信・投稿', 'ライブ・作戦会議', 'メンバーとの交流', '学習コンテンツ', '特典・企画', '運営の人柄'] },
+    { id: 'satisfaction', type: 'scale', title: '全体の満足度', low: '不満', high: '満足' },
+    { id: 'comeback', type: 'radio', title: 'また戻ってくる可能性は？',
+      options: ['条件が合えば戻りたい', 'わからない', 'たぶん戻らない'] },
+  ],
+  message: {
+    title: '運営・メンバーへの想い',
+    note: 'ここが一番知りたいところです。良かったことも、不満も、こうしてほしかったも。長さは気にせず、思いのままに書いてください。',
+    placeholder: '例）入った頃は毎日のライブが楽しみで…／もっとこうだったら続けていたと思う…',
+  },
+};
+</script>
+<style>
+:root {
+  --bg: #F7F5F0; --card: #FFFFFF; --ink: #1F1F1F; --sub: #6B6862; --line: #E6E1D6;
+  --gold: #E2A52B; --gold-ink: #8A5E07; --gold-soft: #FCF3DE; --danger: #C2410C;
+  --dc-bg: #313338; --dc-embed: #2B2D31; --dc-text: #DBDEE1; --dc-sub: #B5BAC1;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #131312; --card: #1C1C1B; --ink: #EDEBE6; --sub: #A29F98; --line: #34322E;
+    --gold: #F0B740; --gold-ink: #F5C969; --gold-soft: #2A2416; --danger: #FB923C;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #131312; --card: #1C1C1B; --ink: #EDEBE6; --sub: #A29F98; --line: #34322E;
+  --gold: #F0B740; --gold-ink: #F5C969; --gold-soft: #2A2416; --danger: #FB923C;
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0; background: var(--bg); color: var(--ink);
+  font-family: "Noto Sans JP", system-ui, -apple-system, sans-serif;
+  line-height: 1.7; font-size: 16px;
+}
+.wrap { max-width: 720px; margin: 0 auto; padding: 0 16px 120px; }
+
+/* hero */
+.hero { padding: 48px 0 28px; }
+.eyebrow { color: var(--gold-ink); font-weight: 700; font-size: 13px; letter-spacing: .04em; }
+.hero h1 { font-size: clamp(26px, 6vw, 36px); line-height: 1.35; margin: 10px 0 14px; font-weight: 900; }
+.hero p { color: var(--sub); margin: 0 0 18px; }
+.anon {
+  display: flex; gap: 12px; align-items: flex-start;
+  background: var(--gold-soft); border: 1px solid color-mix(in srgb, var(--gold) 35%, transparent);
+  border-radius: 14px; padding: 14px 16px; font-size: 14px;
+}
+.anon svg { flex: none; margin-top: 3px; color: var(--gold-ink); }
+.anon b { display: block; margin-bottom: 2px; }
+.anon ul { margin: 4px 0 0; padding-left: 1.2em; color: var(--sub); }
+.demo { margin-top: 12px; font-size: 13px; color: var(--danger); font-weight: 700; }
+
+/* questions */
+.q { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 22px 20px; margin-top: 14px; }
+.q-head { display: flex; align-items: baseline; gap: 10px; }
+.q-num { color: var(--gold-ink); font-weight: 900; font-size: 14px; flex: none; }
+.q h2 { font-size: 18px; margin: 0; line-height: 1.45; }
+.req { display: inline-block; margin-left: 8px; font-size: 11px; font-weight: 700; color: #fff; background: var(--danger); border-radius: 4px; padding: 1px 6px; vertical-align: 2px; }
+.q-note { color: var(--sub); font-size: 13px; margin: 4px 0 0; }
+.q.err { border-color: var(--danger); }
+.q .errmsg { display: none; color: var(--danger); font-size: 13px; font-weight: 700; margin-top: 10px; }
+.q.err .errmsg { display: block; }
+
+.chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.chip { position: relative; }
+.chip input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
+.chip span {
+  display: inline-flex; align-items: center; gap: 6px; min-height: 42px;
+  padding: 8px 14px; border: 1.5px solid var(--line); border-radius: 999px;
+  font-size: 15px; background: var(--card); transition: .15s; user-select: none;
+}
+.chip input:checked + span { border-color: var(--gold); background: var(--gold-soft); color: var(--gold-ink); font-weight: 700; }
+.chip input:focus-visible + span { outline: 2px solid var(--gold); outline-offset: 2px; }
+.chip input[type=checkbox]:checked + span::before { content: "✓"; }
+
+.scale { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
+.scale .chip span { width: 100%; justify-content: center; border-radius: 12px; font-size: 18px; font-weight: 700; }
+.scale-labels { display: flex; justify-content: space-between; font-size: 12px; color: var(--sub); margin-top: 6px; }
+
+.other-input { display: none; width: 100%; margin-top: 10px; }
+.other-input.show { display: block; }
+input[type=text], textarea {
+  width: 100%; font: inherit; color: var(--ink); background: var(--bg);
+  border: 1.5px solid var(--line); border-radius: 12px; padding: 12px 14px;
+}
+input[type=text]:focus, textarea:focus { outline: none; border-color: var(--gold); }
+textarea { min-height: 280px; resize: vertical; line-height: 1.8; margin-top: 14px; }
+.ta-foot { display: flex; justify-content: space-between; gap: 12px; font-size: 12px; color: var(--sub); margin-top: 8px; }
+.ta-foot .count { flex: none; font-variant-numeric: tabular-nums; }
+.saved { color: var(--gold-ink); opacity: 0; transition: opacity .3s; }
+.saved.on { opacity: 1; }
+
+.hp { position: absolute; left: -9999px; width: 1px; height: 1px; overflow: hidden; }
+
+/* submit bar */
+.bar {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 5;
+  background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(8px);
+  border-top: 1px solid var(--line); padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+}
+.bar .inner { max-width: 720px; margin: 0 auto; display: flex; align-items: center; gap: 12px; }
+.bar .hint { flex: 1; font-size: 12px; color: var(--sub); line-height: 1.5; }
+.btn {
+  font: inherit; font-weight: 700; border: 0; border-radius: 999px; cursor: pointer;
+  padding: 12px 26px; min-height: 48px; background: var(--gold); color: #1F1600;
+}
+.btn:disabled { opacity: .5; cursor: default; }
+.btn.ghost { background: transparent; color: var(--ink); border: 1.5px solid var(--line); }
+
+/* preview modal */
+dialog {
+  width: min(640px, calc(100% - 24px)); max-height: calc(100% - 24px); padding: 0;
+  border: 0; border-radius: 18px; background: var(--card); color: var(--ink);
+}
+dialog::backdrop { background: rgba(0,0,0,.55); }
+.m-head { padding: 20px 20px 4px; }
+.m-head h3 { margin: 0; font-size: 18px; }
+.m-head p { margin: 4px 0 0; font-size: 13px; color: var(--sub); }
+.m-body { padding: 14px 20px; }
+.dc { background: var(--dc-bg); border-radius: 12px; padding: 14px; color: var(--dc-text); font-size: 14px; }
+.dc-user { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.dc-avatar { width: 34px; height: 34px; border-radius: 50%; background: var(--gold); display: grid; place-items: center; color: #1F1600; font-weight: 900; font-size: 15px; }
+.dc-name { font-weight: 700; color: #fff; }
+.dc-tag { font-size: 10px; background: #5865F2; color: #fff; border-radius: 3px; padding: 0 4px; margin-left: 4px; font-weight: 700; vertical-align: 1px; }
+.dc-embed { background: var(--dc-embed); border-left: 4px solid #E2A52B; border-radius: 4px; padding: 10px 14px 12px; }
+.dc-author { font-size: 13px; font-weight: 700; color: #fff; }
+.dc-title { font-weight: 700; color: #fff; margin: 4px 0 6px; }
+.dc-desc { white-space: pre-wrap; word-break: break-word; max-height: 260px; overflow: auto; }
+.dc-fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 8px 14px; margin-top: 10px; }
+.dc-field b { display: block; font-size: 13px; color: #fff; }
+.dc-field div { font-size: 13px; color: var(--dc-sub); white-space: pre-wrap; word-break: break-word; }
+.dc-foot { font-size: 11px; color: var(--dc-sub); margin-top: 10px; }
+.mask { background: rgba(226,165,43,.22); color: #F5C969; border-radius: 3px; padding: 0 2px; }
+.m-actions { display: flex; justify-content: flex-end; gap: 10px; padding: 8px 20px 20px; flex-wrap: wrap; }
+.m-error { color: var(--danger); font-size: 13px; font-weight: 700; padding: 0 20px; }
+
+/* thanks */
+.thanks { text-align: center; padding: 96px 8px; }
+.thanks .mark { width: 64px; height: 64px; border-radius: 50%; background: var(--gold-soft); color: var(--gold-ink); display: grid; place-items: center; margin: 0 auto 18px; }
+.thanks h1 { font-size: 26px; margin: 0 0 10px; }
+.thanks p { color: var(--sub); margin: 0; }
+
+@media (max-width: 480px) {
+  .q { padding: 18px 16px; }
+  .chip span { font-size: 14px; padding: 8px 12px; }
+  .bar .hint { display: none; }
+  .bar .btn { width: 100%; }
+}
+</style>
+</head>
+<body>
+<main class="wrap" id="app">
+  <header class="hero">
+    <div class="eyebrow"><span data-brand></span> ／ 退会アンケート</div>
+    <h1>これまで、本当に<br>ありがとうございました。</h1>
+    <p>より良い場所にしていくため、退会の理由と率直な想いを聞かせてください。選択式は数十秒で終わります。</p>
+    <div class="anon">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
+      <div>
+        <b>完全匿名で届きます</b>
+        お名前・Discordアカウントは一切取得しません。回答はランダムな匿名IDに置き換えて、サーバー内の部屋に投稿されます。
+        <ul>
+          <li>本文中の @ユーザー名・URL・メール・ウォレットアドレスなどは自動で伏せ字に</li>
+          <li>退会の直後に投稿されないよう、まとめて時間をずらして投稿</li>
+        </ul>
+      </div>
+    </div>
+    <div class="demo" id="demoNote" hidden>デモモード：GAS_URL が未設定のため、送信しても実際には投稿されません。</div>
+  </header>
+
+  <form id="form" novalidate>
+    <div id="questions"></div>
+
+    <section class="q" id="q-message">
+      <div class="q-head"><span class="q-num" id="msgNum"></span><h2 id="msgTitle"></h2></div>
+      <p class="q-note" id="msgNote"></p>
+      <textarea id="message" name="message"></textarea>
+      <div class="ta-foot">
+        <span>個人が特定されそうな固有のエピソードは、気になる場合はぼかして書いてください。 <span class="saved" id="saved">下書きを保存しました</span></span>
+        <span class="count" id="count">0</span>
+      </div>
+    </section>
+
+    <div class="hp" aria-hidden="true"><label>空欄のままにしてください<input type="text" name="website" id="hp" tabindex="-1" autocomplete="off"></label></div>
+  </form>
+</main>
+
+<div class="bar" id="bar">
+  <div class="inner">
+    <div class="hint">送信前に、匿名化されたあとの投稿イメージを確認できます。</div>
+    <button class="btn" id="previewBtn" type="button">内容を確認する</button>
+  </div>
+</div>
+
+<dialog id="dlg">
+  <div class="m-head">
+    <h3>この内容で投稿されます</h3>
+    <p>投稿者はわかりません。<span class="mask">ハイライト</span>部分は自動で伏せ字になった箇所です。</p>
+  </div>
+  <div class="m-body"><div class="dc" id="dcPreview"></div></div>
+  <div class="m-error" id="sendErr"></div>
+  <div class="m-actions">
+    <button class="btn ghost" type="button" id="backBtn">修正する</button>
+    <button class="btn" type="button" id="sendBtn">この内容で送信</button>
+  </div>
+</dialog>
+
+<script>
+(() => {
+  const $ = s => document.querySelector(s);
+  const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const startedAt = Date.now();
+  const DRAFT_KEY = 'taikai-form-draft-v1';
+  const store = {
+    get() { try { return JSON.parse(localStorage.getItem(DRAFT_KEY) || 'null'); } catch (_) { return null; } },
+    set(v) { try { localStorage.setItem(DRAFT_KEY, JSON.stringify(v)); return true; } catch (_) { return false; } },
+    clear() { try { localStorage.removeItem(DRAFT_KEY); } catch (_) {} },
+  };
+
+  /* ---------- 匿名化（GAS 側の anonymizeText と同じルール） ---------- */
+  const RULES = [
+    [/<@[!&]?\d+>/g, '[メンション省略]'],
+    [/<#\d+>/g, '[チャンネル省略]'],
+    [/https?:\/\/\S+/gi, '[URL省略]'],
+    [/discord\.gg\/\S+/gi, '[URL省略]'],
+    [/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, '[メール省略]'],
+    [/\b0x[a-fA-F0-9]{40}\b/g, '[ウォレット省略]'],
+    [/(?<!\d)\d{17,20}(?!\d)/g, '[ID省略]'],
+    [/(?<!\d)0\d{1,4}-\d{1,4}-\d{3,4}(?!\d)/g, '[電話番号省略]'],
+    [/(?<!\d)0[5-9]0\d{8}(?!\d)/g, '[電話番号省略]'],
+    [/[^\s#＃]{2,32}[#＃]\d{4}\b/g, '[ユーザー名省略]'],
+    [/[@＠][^\s@＠、。,.!?！？「」()（）]{1,32}/g, '@匿名'],
+  ];
+  const anonymize = s => RULES.reduce((t, [re, rep]) => t.replace(re, rep), String(s || '').replace(/\r\n?/g, '\n')).trim();
+  // プレビュー用：伏せ字にした箇所をハイライト
+  const MARKS = ['[メンション省略]', '[チャンネル省略]', '[URL省略]', '[メール省略]', '[ウォレット省略]', '[ID省略]', '[電話番号省略]', '[ユーザー名省略]', '@匿名'];
+  const highlight = s => MARKS.reduce((t, m) => t.split(esc(m)).join(`<span class="mask">${esc(m)}</span>`), esc(s));
+
+  /* ---------- 描画 ---------- */
+  document.querySelectorAll('[data-brand]').forEach(n => n.textContent = CONFIG.BRAND);
+  if (!CONFIG.GAS_URL) $('#demoNote').hidden = false;
+
+  const qs = CONFIG.questions;
+  $('#questions').innerHTML = qs.map((q, i) => {
+    const note = q.noteFrom ? `現在の料金：${CONFIG[q.noteFrom]}` : q.note;
+    let body;
+    if (q.type === 'scale') {
+      body = `<div class="chips scale">${[1, 2, 3, 4, 5].map(n =>
+        `<label class="chip"><input type="radio" name="${q.id}" value="${n}"><span>${n}</span></label>`).join('')}</div>
+        <div class="scale-labels"><span>${esc(q.low)}</span><span>${esc(q.high)}</span></div>`;
+    } else {
+      const opts = q.options.concat(q.other ? ['その他'] : []);
+      body = `<div class="chips">${opts.map(o =>
+        `<label class="chip"><input type="${q.type}" name="${q.id}" value="${esc(o)}"><span>${esc(o)}</span></label>`).join('')}</div>
+        ${q.other ? `<input type="text" class="other-input" id="${q.id}-other" maxlength="100" placeholder="その他の内容（任意）">` : ''}`;
+    }
+    return `<section class="q" id="q-${q.id}">
+      <div class="q-head"><span class="q-num">Q${i + 1}</span><h2>${esc(q.title)}${q.required ? '<span class="req">必須</span>' : ''}</h2></div>
+      ${note ? `<p class="q-note">${esc(note)}</p>` : ''}
+      ${body}
+      <div class="errmsg">ひとつ以上選んでください</div>
+    </section>`;
+  }).join('');
+
+  $('#msgNum').textContent = `Q${qs.length + 1}`;
+  $('#msgTitle').textContent = CONFIG.message.title;
+  $('#msgNote').textContent = CONFIG.message.note;
+  const ta = $('#message');
+  ta.placeholder = CONFIG.message.placeholder;
+  ta.maxLength = CONFIG.MESSAGE_MAX;
+
+  /* ---------- 値の読み書き ---------- */
+  const getRaw = () => {
+    const raw = { message: ta.value, other: {} };
+    qs.forEach(q => {
+      const checked = [...document.querySelectorAll(`input[name="${q.id}"]:checked`)].map(n => n.value);
+      raw[q.id] = q.type === 'checkbox' ? checked : (checked[0] || '');
+      const other = document.getElementById(`${q.id}-other`);
+      if (other) raw.other[q.id] = other.value;
+    });
+    return raw;
+  };
+  const setRaw = raw => {
+    if (!raw) return;
+    qs.forEach(q => {
+      const vals = [].concat(raw[q.id] || []);
+      document.querySelectorAll(`input[name="${q.id}"]`).forEach(n => { n.checked = vals.includes(n.value); });
+      const other = document.getElementById(`${q.id}-other`);
+      if (other && raw.other) other.value = raw.other[q.id] || '';
+    });
+    ta.value = raw.message || '';
+  };
+
+  const syncOther = () => qs.forEach(q => {
+    const other = document.getElementById(`${q.id}-other`);
+    if (!other) return;
+    const on = !!document.querySelector(`input[name="${q.id}"][value="その他"]:checked`);
+    other.classList.toggle('show', on);
+  });
+  const updateCount = () => { $('#count').textContent = `${ta.value.length.toLocaleString()} / ${CONFIG.MESSAGE_MAX.toLocaleString()}字`; };
+
+  setRaw(store.get());
+  syncOther();
+  updateCount();
+
+  let saveTimer;
+  $('#form').addEventListener('input', e => {
+    syncOther();
+    updateCount();
+    const sec = e.target.closest('.q');
+    if (sec) sec.classList.remove('err');
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => {
+      if (store.set(getRaw())) {
+        $('#saved').classList.add('on');
+        setTimeout(() => $('#saved').classList.remove('on'), 1500);
+      }
+    }, 600);
+  });
+
+  /* ---------- 送信データ ---------- */
+  const buildPayload = () => {
+    const raw = getRaw();
+    const answers = qs.map(q => {
+      let value = raw[q.id];
+      if (q.type === 'scale') {
+        const n = Number(value);
+        value = n ? `${'★'.repeat(n)}${'☆'.repeat(5 - n)}（${n}/5）` : '';
+      } else if (q.type === 'checkbox') {
+        value = value.map(v => v === 'その他' && raw.other[q.id].trim() ? `その他：${raw.other[q.id].trim()}` : v);
+      }
+      return { title: q.title, value };
+    });
+    return { answers, message: raw.message, hp: $('#hp').value, elapsedMs: Date.now() - startedAt };
+  };
+
+  const validate = () => {
+    let first = null;
+    qs.filter(q => q.required).forEach(q => {
+      const ok = !!document.querySelector(`input[name="${q.id}"]:checked`);
+      const sec = document.getElementById(`q-${q.id}`);
+      sec.classList.toggle('err', !ok);
+      if (!ok && !first) first = sec;
+    });
+    if (first) first.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    return !first;
+  };
+
+  /* ---------- プレビュー ---------- */
+  const dlg = $('#dlg');
+  let payload = null;
+
+  $('#previewBtn').addEventListener('click', () => {
+    if (!validate()) return;
+    payload = buildPayload();
+    const fields = payload.answers
+      .map(a => ({ title: a.title, value: anonymize([].concat(a.value).join(' / ')) }))
+      .filter(a => a.value);
+    const msg = anonymize(payload.message);
+    const id = '匿名メンバー #' + Math.random().toString(16).slice(2, 6).toUpperCase();
+    $('#dcPreview').innerHTML = `
+      <div class="dc-user"><div class="dc-avatar">退</div><div><span class="dc-name">退会アンケート</span><span class="dc-tag">APP</span></div></div>
+      <div class="dc-embed">
+        <div class="dc-author">${esc(id)}</div>
+        <div class="dc-title">📮 退会アンケート（匿名）</div>
+        <div class="dc-desc">${msg ? '<b>💬 想い</b>\n' + highlight(msg) : '（自由記述なし）'}</div>
+        <div class="dc-fields">${fields.map(f => `<div class="dc-field"><b>${esc(f.title)}</b><div>${highlight(f.value)}</div></div>`).join('')}</div>
+        <div class="dc-foot">投稿者は自動で匿名化されています</div>
+      </div>`;
+    $('#sendErr').textContent = '';
+    dlg.showModal();
+  });
+  $('#backBtn').addEventListener('click', () => dlg.close());
+
+  /* ---------- 送信 ---------- */
+  $('#sendBtn').addEventListener('click', async () => {
+    const btn = $('#sendBtn');
+    btn.disabled = true;
+    btn.textContent = '送信中…';
+    $('#sendErr').textContent = '';
+    try {
+      if (CONFIG.GAS_URL) {
+        // text/plain で送ると CORS のプリフライトが発生せず GAS に届く
+        const res = await fetch(CONFIG.GAS_URL, { method: 'POST', body: JSON.stringify(payload) });
+        const json = await res.json();
+        if (!json.ok) throw new Error(json.error || 'failed');
+      } else {
+        await new Promise(r => setTimeout(r, 700));
+      }
+      store.clear();
+      dlg.close();
+      $('#bar').remove();
+      $('#app').innerHTML = `<div class="thanks">
+        <div class="mark"><svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L20 7"/></svg></div>
+        <h1>受け取りました</h1>
+        <p>貴重な声をありがとうございました。<br>いただいた想いは、運営で大切に読ませていただきます。<br>またどこかで会えたらうれしいです。</p>
+        ${CONFIG.GAS_URL ? '' : '<p class="demo" style="margin-top:20px">（デモモードのため実際には投稿されていません）</p>'}
+      </div>`;
+      window.scrollTo(0, 0);
+    } catch (err) {
+      $('#sendErr').textContent = '送信できませんでした。通信状況を確認して、もう一度お試しください。（入力内容は下書き保存されています）';
+      btn.disabled = false;
+      btn.textContent = 'この内容で送信';
+    }
+  });
+})();
+</script>
+</body>
+</html>
