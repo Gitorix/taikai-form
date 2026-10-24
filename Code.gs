@@ -48,6 +48,19 @@ function submit(body) {
   return handleSubmission_(body);
 }
 
+/** Form.html の CONFIG.questions に書かれた質問名の一覧（サーバー側の許可リスト） */
+function allowedTitles_() {
+  const cache = CacheService.getScriptCache();
+  const hit = cache.get('titles');
+  if (hit) return JSON.parse(hit);
+  const html = HtmlService.createHtmlOutputFromFile('Form').getContent();
+  const block = (html.match(/questions:\s*\[([\s\S]*?)\n\s*\],/) || [])[1] || '';
+  const titles = [];
+  block.replace(/title:\s*'([^']+)'/g, (_, t) => titles.push(t));
+  cache.put('titles', JSON.stringify(titles), 600);
+  return titles;
+}
+
 /** 荒らし対策：1時間・1日あたりの受付数に上限（超えた分は受け付けない） */
 function allowRate_() {
   const cache = CacheService.getScriptCache();
@@ -95,7 +108,7 @@ function handleSubmission_(body) {
         title: clip_(anonymizeText_(a && a.title), 100),
         value: clip_(anonymizeText_(Array.isArray(a && a.value) ? a.value.join(' / ') : a && a.value), CONFIG.MAX_VALUE),
       }))
-      .filter(a => a.title);
+      .filter(a => a.title && allowedTitles_().indexOf(a.title) !== -1); // Form.html にない質問名は捨てる（列を勝手に増やされない）
     const message = clip_(anonymizeText_(body.message), CONFIG.MAX_MESSAGE);
 
     if (!answers.some(a => a.value) && !message) return { ok: false, error: 'empty' };
@@ -239,6 +252,9 @@ function flushQueue_() {
 function postRecord_(rec) {
   const url = PropertiesService.getScriptProperties().getProperty('DISCORD_WEBHOOK_URL');
   if (!url) throw new Error('スクリプトプロパティ DISCORD_WEBHOOK_URL が未設定です');
+  if (!/^https:\/\/(discord\.com|discordapp\.com|canary\.discord\.com|ptb\.discord\.com)\/api\/webhooks\/\d+\/[\w-]+$/.test(url.trim())) {
+    throw new Error('DISCORD_WEBHOOK_URL が Discord の Webhook URL の形ではありません');
+  }
 
   const fields = rec.answers
     .filter(a => a.value)
