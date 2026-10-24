@@ -20,7 +20,9 @@ const CONFIG = {
   MAX_MESSAGE: 5000,
   MAX_ANSWERS: 15,
   MAX_VALUE: 300,
-  MIN_ELAPSED_MS: 3000,    // これより速い送信はボットとみなして捨てる
+  MIN_ELAPSED_MS: 3000,
+  MAX_PER_HOUR: 20,        // 荒らし対策：1時間に受け付ける最大件数
+  MAX_PER_DAY: 60,         // 荒らし対策：1日に受け付ける最大件数    // これより速い送信はボットとみなして捨てる
 };
 
 // 集計シートでグラフにしない列（自由記述）
@@ -36,26 +38,51 @@ const BASE_HEADERS = ['受付日', '匿名ID', '状態', '想い'];
 function doGet() {
   return HtmlService.createHtmlOutputFromFile('Form')
     .setTitle('退会アンケート')
-    .addMetaTag('viewport', 'width=device-width, initial-scale=1')
-    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+    .addMetaTag('viewport', 'width=device-width, initial-scale=1'); // 他サイトへの埋め込みは禁止（既定のまま）
 }
 
 /** アンケート画面（Form.html）から google.script.run で呼ばれる */
 function submit(body) {
-  return handleSubmission(body || {});
+  if (!body || typeof body !== 'object' || JSON.stringify(body).length > 20000) return { ok: false, error: 'invalid' };
+  if (!allowRate_()) return { ok: false, error: 'busy' };
+  return handleSubmission_(body);
 }
 
-/** 外部ページから POST された場合（旧方式・互換用） */
-function doPost(e) {
+/** 荒らし対策：1時間・1日あたりの受付数に上限（超えた分は受け付けない） */
+function allowRate_() {
+  const cache = CacheService.getScriptCache();
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(5000)) return false;
   try {
-    return out(handleSubmission(JSON.parse((e && e.postData && e.postData.contents) || '{}')));
-  } catch (err) {
-    console.error(err);
-    return out({ ok: false, error: 'server' });
+    const now = new Date();
+    const keys = [
+      ['h' + Utilities.formatDate(now, 'Asia/Tokyo', 'yyyyMMddHH'), CONFIG.MAX_PER_HOUR, 3600],
+      ['d' + Utilities.formatDate(now, 'Asia/Tokyo', 'yyyyMMdd'), CONFIG.MAX_PER_DAY, 21600],
+    ];
+    if (keys.some(([k, max]) => Number(cache.get(k) || 0) >= max)) return false;
+    keys.forEach(([k, , ttl]) => cache.put(k, String(Number(cache.get(k) || 0) + 1), ttl));
+    return true;
+  } finally {
+    lock.releaseLock();
   }
 }
 
-function handleSubmission(body) {
+/**
+ * 管理用の関数は、スプレッドシートの編集者（メニュー）か、この Apps Script の時間トリガーからしか動かない。
+ * ウェブアプリの訪問者が google.script.run で直接呼んでも拒否する。
+ */
+function assertAdmin_(e) {
+  if (e && e.triggerUid && ScriptApp.getProjectTriggers().some(t => t.getUniqueId() === String(e.triggerUid))) return;
+  const me = Session.getActiveUser().getEmail();
+  if (me) {
+    if (me === Session.getEffectiveUser().getEmail()) return;
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    if (ss && ss.getEditors().some(u => u.getEmail() === me)) return;
+  }
+  throw new Error('権限がありません');
+}
+
+function handleSubmission_(body) {
   try {
 
     // ボット対策：見えない入力欄に何か入っている／速すぎる送信は成功扱いで捨てる
@@ -65,21 +92,21 @@ function handleSubmission(body) {
     const answers = (Array.isArray(body.answers) ? body.answers : [])
       .slice(0, CONFIG.MAX_ANSWERS)
       .map(a => ({
-        title: clip(anonymizeText(a && a.title), 100),
-        value: clip(anonymizeText(Array.isArray(a && a.value) ? a.value.join(' / ') : a && a.value), CONFIG.MAX_VALUE),
+        title: clip_(anonymizeText_(a && a.title), 100),
+        value: clip_(anonymizeText_(Array.isArray(a && a.value) ? a.value.join(' / ') : a && a.value), CONFIG.MAX_VALUE),
       }))
       .filter(a => a.title);
-    const message = clip(anonymizeText(body.message), CONFIG.MAX_MESSAGE);
+    const message = clip_(anonymizeText_(body.message), CONFIG.MAX_MESSAGE);
 
     if (!answers.some(a => a.value) && !message) return { ok: false, error: 'empty' };
 
-    const rec = { anonId: makeAnonId(), answers, message };
-    const row = appendRecord(rec);
+    const rec = { anonId: makeAnonId_(), answers, message };
+    const row = appendRecord_(rec);
 
     if (CONFIG.MODE === 'instant') {
       try {
-        postRecord(rec);
-        getSheet().getRange(row, COL.STATUS).setValue('投稿済');
+        postRecord_(rec);
+        getSheet_().getRange(row, COL.STATUS).setValue('投稿済');
       } catch (err) {
         console.error(err); // 未投稿のまま残るので flushQueue で再送できる
       }
@@ -94,12 +121,13 @@ function handleSubmission(body) {
 /* ---------------- 匿名化 ---------------- */
 
 /** 本文から個人を特定しうる情報を伏せ字にする（フォーム側のプレビューと同じルール） */
-function anonymizeText(s) {
+function anonymizeText_(s) {
   return String(s == null ? '' : s)
     .replace(/\r\n?/g, '\n')
     .replace(/<@[!&]?\d+>/g, '[メンション省略]')
     .replace(/<#\d+>/g, '[チャンネル省略]')
     .replace(/https?:\/\/\S+/gi, '[URL省略]')
+    .replace(/\b[a-z0-9-]+(\.[a-z0-9-]+)*\.(com|net|org|io|jp|xyz|gg|me|app|dev|co|link|ly)\b\S*/gi, '[URL省略]')
     .replace(/discord\.gg\/\S+/gi, '[URL省略]')
     .replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, '[メール省略]')
     .replace(/\b0x[a-fA-F0-9]{40}\b/g, '[ウォレット省略]')
@@ -112,13 +140,13 @@ function anonymizeText(s) {
 }
 
 /** 投稿ごとに使い捨ての匿名ID（誰とも紐づかない乱数） */
-function makeAnonId() {
+function makeAnonId_() {
   return '匿名メンバー #' + Utilities.getUuid().replace(/-/g, '').slice(0, 4).toUpperCase();
 }
 
 /* ---------------- スプレッドシート ---------------- */
 
-function getSheet() {
+function getSheet_() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   let sh = ss.getSheetByName(CONFIG.SHEET_NAME);
   if (!sh) {
@@ -129,11 +157,11 @@ function getSheet() {
   return sh;
 }
 
-function appendRecord(rec) {
+function appendRecord_(rec) {
   const lock = LockService.getScriptLock();
   lock.waitLock(15000);
   try {
-    const sh = getSheet();
+    const sh = getSheet_();
     const headers = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].map(String);
     rec.answers.forEach(a => {
       if (headers.indexOf(a.title) === -1) {
@@ -146,8 +174,8 @@ function appendRecord(rec) {
     row[COL.DATE - 1] = Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy/MM/dd');
     row[COL.ANON - 1] = rec.anonId;
     row[COL.STATUS - 1] = '未投稿';
-    row[COL.MESSAGE - 1] = safeCell(rec.message);
-    rec.answers.forEach(a => { row[headers.indexOf(a.title)] = safeCell(a.value); });
+    row[COL.MESSAGE - 1] = safeCell_(rec.message);
+    rec.answers.forEach(a => { row[headers.indexOf(a.title)] = safeCell_(a.value); });
     sh.appendRow(row);
     return sh.getLastRow();
   } finally {
@@ -156,17 +184,24 @@ function appendRecord(rec) {
 }
 
 /** まとめ投稿：未投稿の回答をシャッフルして Discord へ（時間トリガーから呼ばれる） */
-function dailyJob() {
-  if (CONFIG.MODE === 'batch') flushQueue();
-  buildDashboard();
+function dailyJob(e) {
+  assertAdmin_(e);
+  if (CONFIG.MODE === 'batch') flushQueue_();
+  buildDashboard_();
 }
 
-function flushQueue() {
+/** メニュー「溜まっている回答を今すぐ投稿」 */
+function postNow() {
+  assertAdmin_();
+  flushQueue_();
+}
+
+function flushQueue_() {
   const lock = LockService.getScriptLock();
   lock.waitLock(30000);
   let sh, values, pending;
   try {
-    sh = getSheet();
+    sh = getSheet_();
     const last = sh.getLastRow();
     if (last < 2) return;
     values = sh.getRange(1, 1, last, sh.getLastColumn()).getValues();
@@ -181,7 +216,7 @@ function flushQueue() {
   }
 
   const headers = values[0].map(String);
-  shuffle(pending).forEach(r => {
+  shuffle_(pending).forEach(r => {
     const v = values[r - 1];
     const rec = {
       anonId: String(v[COL.ANON - 1]),
@@ -189,7 +224,7 @@ function flushQueue() {
       answers: headers.slice(COL.FIRST_Q - 1).map((h, j) => ({ title: h, value: String(v[COL.FIRST_Q - 1 + j] || '') })),
     };
     try {
-      postRecord(rec);
+      postRecord_(rec);
       sh.getRange(r, COL.STATUS).setValue('投稿済');
     } catch (err) {
       console.error(err);
@@ -201,22 +236,22 @@ function flushQueue() {
 
 /* ---------------- Discord ---------------- */
 
-function postRecord(rec) {
+function postRecord_(rec) {
   const url = PropertiesService.getScriptProperties().getProperty('DISCORD_WEBHOOK_URL');
   if (!url) throw new Error('スクリプトプロパティ DISCORD_WEBHOOK_URL が未設定です');
 
   const fields = rec.answers
     .filter(a => a.value)
-    .map(a => ({ name: clip(a.title, 256), value: clip(a.value, 1024), inline: a.value.length <= 24 }));
+    .map(a => ({ name: clip_(a.title, 256), value: clip_(a.value, 1024), inline: a.value.length <= 24 }));
   const fieldChars = fields.reduce((n, f) => n + f.name.length + f.value.length, 0);
 
   // 1 つの embed は合計 6000 字まで。1 通目に入りきらない想いは続きとして分けて送る
   const firstLen = Math.max(0, Math.min(3800, 5500 - fieldChars));
   const msg = rec.message || '';
-  const chunks = msg ? [msg.slice(0, firstLen)].concat(chunk(msg.slice(firstLen), 3800)).filter(Boolean) : [];
+  const chunks = msg ? [msg.slice(0, firstLen)].concat(chunk_(msg.slice(firstLen), 3800)).filter(Boolean) : [];
   const total = chunks.length;
 
-  send(url, {
+  send_(url, {
     embeds: [{
       title: '📮 ' + CONFIG.TITLE,
       color: CONFIG.EMBED_COLOR,
@@ -228,7 +263,7 @@ function postRecord(rec) {
   });
   for (let i = 1; i < total; i++) {
     Utilities.sleep(800);
-    send(url, {
+    send_(url, {
       embeds: [{
         color: CONFIG.EMBED_COLOR,
         author: { name: rec.anonId + '（続き）' },
@@ -239,7 +274,7 @@ function postRecord(rec) {
   }
 }
 
-function send(url, payload, retried) {
+function send_(url, payload, retried) {
   payload.username = CONFIG.BOT_NAME;
   payload.allowed_mentions = { parse: [] }; // @everyone 等で誰かを呼び出さない
   const res = UrlFetchApp.fetch(url, {
@@ -252,7 +287,7 @@ function send(url, payload, retried) {
   if (code === 429 && !retried) {
     const wait = (JSON.parse(res.getContentText() || '{}').retry_after || 2) * 1000;
     Utilities.sleep(Math.min(wait + 200, 30000));
-    return send(url, payload, true);
+    return send_(url, payload, true);
   }
   if (code >= 300) throw new Error('Discord ' + code + ': ' + res.getContentText());
 }
@@ -265,15 +300,20 @@ function onOpen() {
     .addItem('📊 集計グラフを更新', 'buildDashboard')
     .addSeparator()
     .addItem('Discord にテスト投稿', 'testDiscord')
-    .addItem('溜まっている回答を今すぐ投稿', 'flushQueue')
+    .addItem('溜まっている回答を今すぐ投稿', 'postNow')
     .addItem('毎日の自動処理を設定（最初に1回）', 'setupBatchTrigger')
     .addToUi();
 }
 
 /** 「回答」シートを数えて「集計」シートに表とグラフを作り直す */
 function buildDashboard() {
+  assertAdmin_();
+  buildDashboard_();
+}
+
+function buildDashboard_() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const src = getSheet();
+  const src = getSheet_();
   const last = src.getLastRow();
   const values = last >= 2 ? src.getRange(1, 1, last, src.getLastColumn()).getValues() : [src.getRange(1, 1, 1, src.getLastColumn()).getValues()[0]];
   const headers = values[0].map(String);
@@ -352,40 +392,39 @@ function buildDashboard() {
 
 /** Discord にテスト投稿する（最初の権限承認もこれで行う） */
 function testDiscord() {
-  postRecord({
-    anonId: makeAnonId(),
+  assertAdmin_();
+  postRecord_({
+    anonId: makeAnonId_(),
     answers: [
       { title: '在籍期間', value: '3〜6ヶ月' },
       { title: '退会の理由', value: '料金が高い / 時間がとれない' },
       { title: 'いくらなら続けていましたか？', value: '3,000〜3,999円' },
     ],
-    message: anonymizeText('これはテスト投稿です。@taro さんや https://example.com は自動で伏せ字になります。'),
+    message: anonymizeText_('これはテスト投稿です。@taro さんや https://example.com は自動で伏せ字になります。'),
   });
 }
 
 /** 毎日の自動処理（まとめ投稿＋集計グラフ更新）のトリガーを作る。最初に 1 回だけ実行 */
 function setupBatchTrigger() {
+  assertAdmin_();
   ScriptApp.getProjectTriggers()
-    .filter(t => ['flushQueue', 'dailyJob'].indexOf(t.getHandlerFunction()) !== -1)
+    .filter(t => ['flushQueue', 'flushQueue_', 'dailyJob'].indexOf(t.getHandlerFunction()) !== -1)
     .forEach(t => ScriptApp.deleteTrigger(t));
   ScriptApp.newTrigger('dailyJob').timeBased().everyDays(1).atHour(CONFIG.BATCH_HOUR).inTimezone('Asia/Tokyo').create();
 }
 
 /* ---------------- 小物 ---------------- */
 
-function out(obj) {
-  return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
-}
-function clip(s, n) {
+function clip_(s, n) {
   s = String(s == null ? '' : s);
   return s.length > n ? s.slice(0, n - 1) + '…' : s;
 }
-function chunk(s, n) {
+function chunk_(s, n) {
   const res = [];
   for (let i = 0; i < s.length; i += n) res.push(s.slice(i, i + n));
   return res;
 }
-function shuffle(a) {
+function shuffle_(a) {
   for (let i = a.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
     [a[i], a[j]] = [a[j], a[i]];
@@ -393,7 +432,7 @@ function shuffle(a) {
   return a;
 }
 /** スプレッドシートで数式として解釈されないようにする */
-function safeCell(v) {
+function safeCell_(v) {
   v = String(v == null ? '' : v);
-  return /^[=+\-@]/.test(v) ? "'" + v : v;
+  return /^[=+\-@\t\r]/.test(v) ? "'" + v : v;
 }

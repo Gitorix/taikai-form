@@ -12,8 +12,6 @@
 <script>
 /* ===================== 設定（ここだけ編集すればOK） ===================== */
 const CONFIG = {
-  // Google Apps Script のウェブアプリURL。空のままだとデモモード（送信されない）
-  GAS_URL: '',
   BRAND: 'SEVEN DAO',
   CURRENT_PRICE: '月額 5,000円',
   MESSAGE_MAX: 5000,
@@ -193,7 +191,7 @@ dialog::backdrop { background: rgba(0,0,0,.55); }
         </ul>
       </div>
     </div>
-    <div class="demo" id="demoNote" hidden>デモモード：GAS_URL が未設定のため、送信しても実際には投稿されません。</div>
+    <div class="demo" id="demoNote" hidden>デモ表示です：このページから送信しても、どこにも送られません。</div>
   </header>
 
   <form id="form" novalidate>
@@ -268,7 +266,7 @@ dialog::backdrop { background: rgba(0,0,0,.55); }
   document.querySelectorAll('[data-brand]').forEach(n => n.textContent = CONFIG.BRAND);
   // Apps Script の中で表示されているときは、そのスクリプトに直接送る（URL 設定不要）
   const IN_GAS = typeof google !== 'undefined' && google.script && google.script.run;
-  const LIVE = IN_GAS || !!CONFIG.GAS_URL;
+  const LIVE = !!IN_GAS; // Apps Script の外（GitHub Pages 等）ではデモモード：どこにも送信しない
   if (!LIVE) $('#demoNote').hidden = false;
 
   const qs = CONFIG.questions;
@@ -419,11 +417,6 @@ dialog::backdrop { background: rgba(0,0,0,.55); }
       if (IN_GAS) {
         const json = await new Promise((ok, ng) => google.script.run.withSuccessHandler(ok).withFailureHandler(ng).submit(payload));
         if (!json.ok) throw new Error(json.error || 'failed');
-      } else if (CONFIG.GAS_URL) {
-        // text/plain で送ると CORS のプリフライトが発生せず GAS に届く
-        const res = await fetch(CONFIG.GAS_URL, { method: 'POST', body: JSON.stringify(payload) });
-        const json = await res.json();
-        if (!json.ok) throw new Error(json.error || 'failed');
       } else {
         await new Promise(r => setTimeout(r, 700));
       }
@@ -438,7 +431,9 @@ dialog::backdrop { background: rgba(0,0,0,.55); }
       </div>`;
       window.scrollTo(0, 0);
     } catch (err) {
-      $('#sendErr').textContent = '送信できませんでした。通信状況を確認して、もう一度お試しください。（入力内容は下書き保存されています）';
+      $('#sendErr').textContent = err && err.message === 'busy'
+        ? 'ただいま送信が集中しています。時間をおいてもう一度お試しください。（入力内容は下書き保存されています）'
+        : '送信できませんでした。通信状況を確認して、もう一度お試しください。（入力内容は下書き保存されています）';
       btn.disabled = false;
       btn.textContent = 'この内容で送信';
     }

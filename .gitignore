@@ -1,1 +1,5 @@
 引き継ぎ/
+.claude/
+.DS_Store
+.env
+*.env
